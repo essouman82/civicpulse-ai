@@ -1,41 +1,27 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    /**
+     * Cette migration est conservée pour préserver l'historique
+     * des migrations du projet.
+     *
+     * Les champs incident_id, agent, description et
+     * date_intervention sont déjà créés dans
+     * create_interventions_table.
+     */
     public function up(): void
     {
-        Schema::table('interventions', function (Blueprint $table) {
-
-            $table->foreignId('incident_id')
-                  ->after('id')
-                  ->constrained()
-                  ->onDelete('cascade');
-
-            $table->string('agent');
-
-            $table->text('description');
-
-            $table->date('date_intervention');
-
-        });
+        //
     }
 
+    /**
+     * Annulation de la migration.
+     */
     public function down(): void
     {
-        Schema::table('interventions', function (Blueprint $table) {
-
-            $table->dropForeign(['incident_id']);
-            $table->dropColumn([
-                'incident_id',
-                'agent',
-                'description',
-                'date_intervention'
-            ]);
-
-        });
+        //
     }
 };
