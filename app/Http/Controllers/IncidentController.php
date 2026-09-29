@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Incident;
 use Illuminate\Http\Request;
 use App\Services\IncidentAIService;
+use App\Notifications\IncidentStatusUpdated;
 
 class IncidentController extends Controller
 {
@@ -19,80 +20,65 @@ class IncidentController extends Controller
      * Liste des incidents
      */
     public function index(Request $request)
-    {
-        $query = Incident::with('user')->latest();
+{
+   $query = Incident::with('user')->latest();
 
-        // =====================================================
-        // RECHERCHE
-        // =====================================================
+// Le citoyen ne voit que ses propres incidents
+if (auth()->user()->role === 'citoyen') {
+    $query->where('user_id', auth()->id());
+}
 
-        if ($request->filled('recherche')) {
-            $recherche = $request->recherche;
 
-            $query->where(function ($q) use ($recherche) {
-                $q->where('titre', 'like', '%' . $recherche . '%')
-                    ->orWhere('description', 'like', '%' . $recherche . '%')
-                    ->orWhere('categorie', 'like', '%' . $recherche . '%')
-                    ->orWhere('service', 'like', '%' . $recherche . '%');
-            });
-        }
+    // Recherche
+    if ($request->filled('recherche')) {
+        $recherche = $request->recherche;
 
-        // =====================================================
-        // FILTRE CATÉGORIE
-        // =====================================================
-
-        if ($request->filled('categorie')) {
-            $query->where('categorie', $request->categorie);
-        }
-
-        // =====================================================
-        // FILTRE PRIORITÉ
-        // =====================================================
-
-        if ($request->filled('priorite')) {
-            $query->where('priorite', $request->priorite);
-        }
-
-        // =====================================================
-        // FILTRE STATUT
-        // =====================================================
-
-        if ($request->filled('statut')) {
-            $query->where('statut', $request->statut);
-        }
-
-        // =====================================================
-        // INCIDENTS
-        // =====================================================
-
-        $incidents = $query
-            ->paginate(10)
-            ->withQueryString();
-
-        // =====================================================
-        // STATISTIQUES
-        // =====================================================
-
-        $total = Incident::count();
-
-        $signales = Incident::where('statut', 'Signalé')->count();
-
-        $encours = Incident::where('statut', 'En cours')->count();
-
-        $resolus = Incident::where('statut', 'Résolu')->count();
-
-        $critiques = Incident::where('priorite', 'Critique')->count();
-
-        return view('incidents.index', compact(
-            'incidents',
-            'total',
-            'signales',
-            'encours',
-            'resolus',
-            'critiques'
-        ));
+        $query->where(function ($q) use ($recherche) {
+            $q->where('titre', 'like', '%' . $recherche . '%')
+                ->orWhere('description', 'like', '%' . $recherche . '%')
+                ->orWhere('categorie', 'like', '%' . $recherche . '%')
+                ->orWhere('service', 'like', '%' . $recherche . '%');
+        });
     }
 
+    // Catégorie
+    if ($request->filled('categorie')) {
+        $query->where('categorie', $request->categorie);
+    }
+
+    // Priorité
+    if ($request->filled('priorite')) {
+        $query->where('priorite', $request->priorite);
+    }
+
+    // Statut
+    if ($request->filled('statut')) {
+        $query->where('statut', $request->statut);
+    }
+
+    $incidents = $query
+        ->paginate(10)
+        ->withQueryString();
+
+    $total = Incident::count();
+
+    $signales = Incident::where('statut', 'Signalé')->count();
+
+    $encours = Incident::where('statut', 'En cours')->count();
+
+    $resolus = Incident::where('statut', 'Résolu')->count();
+
+    $critiques = Incident::where('priorite', 'Critique')->count();
+
+    return view('incidents.index', compact(
+        'incidents',
+        'total',
+        'signales',
+        'encours',
+        'resolus',
+        'critiques'
+    ));
+}
     /**
      * Formulaire de création
      */
@@ -104,128 +90,176 @@ class IncidentController extends Controller
     /**
      * Enregistrer un nouvel incident
      */
-    public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'titre' => 'required|string|max:255',
-            'description' => 'required|string',
-            'categorie' => 'nullable|string|max:255',
-            'latitude' => 'nullable|numeric',
-            'longitude' => 'nullable|numeric',
-        ]);
+/**
+ * Enregistrer un nouvel incident
+ */
+public function store(Request $request)
+{
+    $validated = $request->validate([
+        'titre' => 'required|string|max:255',
+        'description' => 'required|string',
+        'categorie' => 'nullable|string|max:255',
+        'latitude' => 'nullable|numeric',
+        'longitude' => 'nullable|numeric',
+        'photo' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:5120',
+    ]);
 
-        // =====================================================
-        // ANALYSE IA
-        // =====================================================
+    // =====================================================
+    // ANALYSE IA
+    // =====================================================
 
-        $analyse = $this->ai->analyser(
-            $validated['titre'],
-            $validated['description'],
-            $validated['categorie'] ?? null
-        );
+    $analyse = $this->ai->analyser(
+        $validated['titre'],
+        $validated['description'],
+        $validated['categorie'] ?? null
+    );
 
-        // =====================================================
-        // CRÉATION DE L'INCIDENT
-        // =====================================================
+    // =====================================================
+    // PHOTO
+    // =====================================================
 
-        Incident::create([
-            'user_id' => auth()->id(),
-            'titre' => $validated['titre'],
-            'description' => $validated['description'],
+    $photo = null;
 
-            'categorie' => $analyse['categorie'],
-            'priorite' => $analyse['priorite'],
-            'service' => $analyse['service'],
-
-            'score_ia' => $analyse['score_ia'],
-            'explication_ia' => $analyse['explication_ia'],
-
-            'latitude' => $validated['latitude'] ?? null,
-            'longitude' => $validated['longitude'] ?? null,
-
-            'statut' => 'Signalé',
-        ]);
-
-        return redirect()
-            ->route('incidents.index')
-            ->with(
-                'success',
-                'Incident signalé avec succès. Notre système IA a analysé automatiquement le signalement.'
-            );
+    if ($request->hasFile('photo')) {
+        $photo = $request->file('photo')->store('incidents', 'public');
     }
 
-    /**
+    // =====================================================
+    // CRÉATION DE L'INCIDENT
+    // =====================================================
+
+    Incident::create([
+        'user_id' => auth()->id(),
+        'titre' => $validated['titre'],
+        'description' => $validated['description'],
+
+        'categorie' => $analyse['categorie'],
+        'priorite' => $analyse['priorite'],
+        'service' => $analyse['service'],
+
+        'score_ia' => $analyse['score_ia'],
+        'explication_ia' => $analyse['explication_ia'],
+
+        'latitude' => $validated['latitude'] ?? null,
+        'longitude' => $validated['longitude'] ?? null,
+
+        'photo' => $photo,
+
+        'statut' => 'Signalé',
+    ]);
+
+    return redirect()
+        ->route('incidents.index')
+        ->with(
+            'success',
+            'Incident signalé avec succès. Notre système IA a analysé automatiquement le signalement.'
+        );
+}
+        /**
      * Afficher un incident
      */
-    public function show(Incident $incident)
-    {
-        $incident->load([
-            'user',
-            'interventions'
-        ]);
+   public function show(Incident $incident)
+{
+    if (
+        auth()->user()->isCitoyen() &&
+        $incident->user_id !== auth()->id()
+    ) {
+        abort(403, 'Vous n\'êtes pas autorisé à consulter cet incident.');
+    }
 
-        return view(
-            'incidents.show',
-            compact('incident')
+    $incident->load([
+        'user',
+        'interventions'
+    ]);
+
+    return view(
+        'incidents.show',
+        compact('incident')
+    );
+}
+
+
+/**
+ * Formulaire de modification
+ */
+public function edit(Incident $incident)
+{
+    if (
+        auth()->user()->isCitoyen() &&
+        $incident->user_id !== auth()->id()
+    ) {
+        abort(403, 'Vous n\'êtes pas autorisé à modifier cet incident.');
+    }
+
+    return view(
+        'incidents.edit',
+        compact('incident')
+    );
+}
+
+
+/**
+ * Mise à jour d'un incident
+ */
+public function update(Request $request, Incident $incident)
+{
+    if (
+        auth()->user()->isCitoyen() &&
+        $incident->user_id !== auth()->id()
+    ) {
+        abort(403, 'Vous n\'êtes pas autorisé à modifier cet incident.');
+    }
+
+    $validated = $request->validate([
+        'titre' => 'required|string|max:255',
+        'description' => 'required|string',
+        'categorie' => 'required|string|max:255',
+        'priorite' => 'required|in:Faible,Moyenne,Élevée,Critique',
+        'service' => 'nullable|string|max:255',
+        'statut' => 'required|in:Signalé,En cours,Résolu',
+        'latitude' => 'nullable|numeric',
+        'longitude' => 'nullable|numeric',
+    ]);
+
+    // On mémorise l'ancien statut avant la modification
+    $ancienStatut = $incident->statut;
+
+    // Mise à jour
+    $incident->update($validated);
+
+    // Notification uniquement si le statut a réellement changé
+    if (
+        $ancienStatut !== $incident->statut &&
+        $incident->user
+    ) {
+        $incident->user->notify(
+            new IncidentStatusUpdated($incident)
         );
     }
 
-    /**
-     * Formulaire de modification
-     */
-    public function edit(Incident $incident)
-    {
-        return view(
-            'incidents.edit',
-            compact('incident')
+    return redirect()
+        ->route('incidents.show', $incident)
+        ->with(
+            'success',
+            'Incident mis à jour avec succès.'
         );
-    }
-
-    /**
-     * Mise à jour d'un incident
-     */
-    public function update(Request $request, Incident $incident)
-    {
-        $validated = $request->validate([
-            'titre' => 'required|string|max:255',
-            'description' => 'required|string',
-            'categorie' => 'required|string|max:255',
-
-            // Valeurs compatibles avec la base de données
-            'priorite' => 'required|in:Faible,Moyenne,Élevée,Critique',
-
-            'service' => 'nullable|string|max:255',
-
-            'statut' => 'required|in:Signalé,En cours,Résolu',
-
-            'latitude' => 'nullable|numeric',
-            'longitude' => 'nullable|numeric',
-        ]);
-
-        $incident->update($validated);
-
-        return redirect()
-            ->route('incidents.show', $incident)
-            ->with(
-                'success',
-                'Incident mis à jour avec succès.'
-            );
-    }
-
+}
     /**
      * Suppression
      */
     public function destroy(Incident $incident)
-    {
-        $incident->delete();
+{
+    $this->authorize('delete', $incident);
 
-        return redirect()
-            ->route('incidents.index')
-            ->with(
-                'success',
-                'Incident supprimé avec succès.'
-            );
-    }
+    $incident->delete();
+
+    return redirect()
+        ->route('incidents.index')
+        ->with(
+            'success',
+            'Incident supprimé avec succès.'
+        );
+}
 
     /**
  * Carte interactive

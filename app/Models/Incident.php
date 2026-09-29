@@ -30,6 +30,8 @@ class Incident extends Model
 
     'longitude',
 
+    'photo', 
+
     'statut',
 
 ];

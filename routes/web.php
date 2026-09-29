@@ -12,7 +12,6 @@ use App\Http\Controllers\IncidentController;
 use App\Http\Controllers\InterventionController;
 use App\Http\Controllers\UserController;
 
-
 /*
 |--------------------------------------------------------------------------
 | PAGE D'ACCUEIL

@@ -15,9 +15,19 @@ class DashboardController extends Controller
 
         return view('dashboard.citizen.index', [
             'totalIncidents' => $incidents->count(),
-            'signales' => $incidents->where('statut', 'Signalé')->count(),
-            'encours' => $incidents->where('statut', 'En cours')->count(),
-            'resolus' => $incidents->where('statut', 'Résolu')->count(),
+
+            'signales' => $incidents
+                ->where('statut', 'Signalé')
+                ->count(),
+
+            'encours' => $incidents
+                ->where('statut', 'En cours')
+                ->count(),
+
+            'resolus' => $incidents
+                ->where('statut', 'Résolu')
+                ->count(),
+
             'incidents' => $incidents,
         ]);
     }
